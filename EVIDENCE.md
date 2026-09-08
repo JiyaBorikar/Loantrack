@@ -1,6 +1,7 @@
 # LoanTrack — Evidence
 
 This document records the verification evidence for the LoanTrack SRE/DevOps assignment.
+
 Terminal output is preferred where possible; UI screenshots are included as supporting evidence.
 
 ---
@@ -18,10 +19,10 @@ docker compose ps
 Observed result:
 
 ```text
-NAME                   IMAGE                   SERVICE    STATUS
-loantrack-backend-1    loantrack-backend:v1    backend    Up (healthy)
-loantrack-frontend-1   loantrack-frontend:v1   frontend   Up
-loantrack-postgres-1   postgres:16             postgres   Up (healthy)
+NAME                    IMAGE                   SERVICE    STATUS
+loantrack-backend-1     loantrack-backend:v1   backend    Up (healthy)
+loantrack-frontend-1    loantrack-frontend:v1   frontend   Up
+loantrack-postgres-1    postgres:16             postgres   Up (healthy)
 ```
 
 Ports observed:
@@ -30,7 +31,7 @@ Ports observed:
 - Backend: `8000 -> 8000`
 - PostgreSQL: `5432` is internal to the Compose network
 
-This verifies that the three application tiers run together and that PostgreSQL is not published to the host.
+This verifies that the three tiers run together and PostgreSQL is not published to the host.
 
 ### 1.2 Image size and non-root execution
 
@@ -95,12 +96,6 @@ Browser -> Nginx frontend -> FastAPI backend -> PostgreSQL
 ```
 
 The frontend does not connect directly to PostgreSQL.
-
-### 1.4 Docker UI screenshot
-
-Supporting screenshot:
-
-- `docker-ui.png` — LoanTrack running through Docker Compose, showing the application dashboard and the newly added Docker Evidence loan.
 
 ---
 
@@ -173,11 +168,11 @@ Verified:
 - `loantrack-db-init` ConfigMap
 - `loantrack-db-secret` Secret containing 3 data entries
 
-Sensitive database values are supplied through the Kubernetes Secret rather than being written as literals in the Deployment.
+Sensitive database values are supplied through the Kubernetes Secret rather than written as literals in the Deployment.
 
 ### 2.5 Kubernetes database verification
 
-The PostgreSQL schema was inspected with:
+Schema inspection:
 
 ```powershell
 kubectl exec -n loantrack postgres-0 -- psql -U loantrack_user -d loantrack -c "\d loans"
@@ -192,7 +187,7 @@ The `loans` table contains:
 - `status`
 - `created_at`
 
-The database was then queried directly:
+Direct query:
 
 ```powershell
 kubectl exec -n loantrack postgres-0 -- psql -U loantrack_user -d loantrack -c "SELECT id, borrower_name, loan_amount, property_city, status FROM loans ORDER BY id;"
@@ -210,44 +205,7 @@ minikube service frontend -n loantrack --url
 
 The resulting local Minikube URL was opened in the browser.
 
-The UI successfully displayed the LoanTrack dashboard and loan records, and a loan could be added successfully.
-
-Supporting screenshot:
-
-- `kubernetes-ui.png` — LoanTrack dashboard running through the Kubernetes frontend service.
-
-### 2.7 Backend and database health
-
-The backend exposes:
-
-```text
-GET /healthz
-GET /readyz
-GET /loans
-POST /loans
-```
-
-`/healthz` is used for process liveness/startup checks, while `/readyz` verifies database reachability.
-
-The Kubernetes backend Deployment wires:
-
-- startup probe -> `/healthz`
-- liveness probe -> `/healthz`
-- readiness probe -> `/readyz`
-
-### 2.8 Kubernetes DNS and connectivity
-
-Backend-to-PostgreSQL DNS was verified using:
-
-```powershell
-kubectl exec deployment/backend -- python -c "import socket; print(socket.gethostbyname('postgres.loantrack.svc.cluster.local'))"
-```
-
-The PostgreSQL Service resolved successfully.
-
-A TCP connectivity test to the PostgreSQL Service also succeeded.
-
-The backend therefore communicates with PostgreSQL through Kubernetes Service DNS rather than an IP address or localhost.
+The UI displayed the LoanTrack dashboard and loan records, and a loan was added successfully.
 
 ---
 
@@ -255,21 +213,23 @@ The backend therefore communicates with PostgreSQL through Kubernetes Service DN
 
 ### 3.1 Backend scaling
 
-The backend was scaled to 3 replicas and verified with:
+The backend was scaled to 3 replicas.
+
+Command:
 
 ```powershell
-kubectl get pods -n loantrack
+kubectl get pods -n loantrack -l app=backend
 ```
 
 Three backend pods reached `Running` and `Ready`.
 
 Requests through the frontend were observed across multiple backend pod names, demonstrating that more than one backend replica served requests.
 
-### 3.2 Rolling update
+### 3.2 Rolling update and rollback
 
 A `v2` backend image was built and deployed.
 
-The rollout was checked using:
+Command:
 
 ```powershell
 kubectl rollout status deployment/backend -n loantrack
@@ -277,13 +237,13 @@ kubectl rollout status deployment/backend -n loantrack
 
 The rollout completed successfully.
 
-Rollout history was inspected, and the previous revision was restored using:
+Rollback was tested with:
 
 ```powershell
 kubectl rollout undo deployment/backend -n loantrack
 ```
 
-The Deployment uses a RollingUpdate strategy with:
+The Deployment uses:
 
 ```yaml
 maxUnavailable: 0
@@ -306,9 +266,9 @@ Kubernetes automatically created a replacement pod and restored the Deployment t
 
 The PostgreSQL pod was deleted during testing.
 
-After Kubernetes recreated `postgres-0`, the existing loan records remained available.
+After Kubernetes recreated `postgres-0`, the existing loan records remained available and the PostgreSQL PVC remained `Bound`.
 
-The PostgreSQL PVC remained `Bound`, demonstrating persistence through pod replacement.
+This verifies database persistence through PostgreSQL pod replacement.
 
 ---
 
@@ -318,7 +278,13 @@ The Compose stack was stopped and started again.
 
 The PostgreSQL named volume preserved the existing database state.
 
-A separate `docker compose down -v` test was also performed to demonstrate that removing the named volume removes PostgreSQL state and causes the initialization SQL to run again with the seed records.
+A separate:
+
+```powershell
+docker compose down -v
+```
+
+test was also performed. Removing the named volume removed the PostgreSQL state and caused the initialization SQL to run again with the seed records.
 
 ---
 
@@ -342,17 +308,102 @@ The script:
 8. Applies frontend resources and waits for the Deployment rollout.
 9. Prints pods, services, and the frontend URL.
 
-The script was syntax-checked with:
+Syntax check:
 
 ```bash
 bash -n scripts/deploy.sh
 ```
 
-The deployment script was run successfully more than once, demonstrating idempotent deployment behavior. The database records remained intact on repeated execution.
+The deployment script was run successfully more than once. Repeated execution completed successfully and the database records remained intact.
 
 ---
 
-## 6. Security Evidence
+## 6. Troubleshooting Evidence
+
+### Problem 1 — Backend Docker image exceeded the size limit
+
+**Symptom**
+
+The first backend image was approximately 390 MB, exceeding the required 300 MB limit.
+
+**Diagnosis**
+
+```powershell
+docker images loantrack-backend
+```
+
+The Dockerfile was reviewed after confirming the oversized image.
+
+**Root cause**
+
+The original Dockerfile used a recursive ownership change that also affected the copied Python virtual environment.
+
+**Fix**
+
+The ownership command was changed to operate only on `/app`:
+
+```dockerfile
+RUN useradd --create-home appuser && \
+    chown -R appuser:appuser /app
+```
+
+The image was rebuilt and verified at approximately 289 MB.
+
+### Problem 2 — Frontend could not resolve the backend container
+
+**Symptom**
+
+During an early standalone Docker test, the frontend could not reach the backend using the backend service name.
+
+**Diagnosis**
+
+```powershell
+docker network ls
+docker network inspect <network-name>
+docker exec <frontend-container> getent hosts backend
+```
+
+**Root cause**
+
+The containers were initially tested on Docker's default bridge network, where the required service-name DNS behavior was not available.
+
+**Fix**
+
+A user-defined Compose network named `loantrack-network` was configured. The frontend communicates with the backend using the Compose service name instead of an IP address or `localhost`.
+
+The final application worked through:
+
+```text
+http://localhost:8081
+```
+
+### Problem 3 — Minikube backend image build failed
+
+**Symptom**
+
+An early Minikube backend image build failed because the Dockerfile was not available in the build context.
+
+**Diagnosis**
+
+```powershell
+minikube image build -t loantrack-backend:v1 ./backend
+```
+
+The backend `.dockerignore` file was then inspected.
+
+**Root cause**
+
+The backend `.dockerignore` incorrectly excluded `Dockerfile`.
+
+**Fix**
+
+The `Dockerfile` entry was removed from `backend/.dockerignore`.
+
+The image was rebuilt successfully with Minikube and the Kubernetes deployment then completed successfully.
+
+---
+
+## 7. Security Evidence
 
 Verified design:
 
@@ -378,24 +429,25 @@ Kubernetes database credentials are provided through a Secret.
 
 The real Kubernetes Secret was created from local environment variables and was not committed to the repository.
 
+The backend source requires PostgreSQL configuration through environment variables and does not contain hard-coded database credential defaults.
+
 ---
 
-## 7. Evidence Screenshots
+## 8. Evidence Screenshots
 
-The following screenshots are intended as supporting visual evidence:
+The following screenshots are included as supporting visual evidence:
 
 | Screenshot | Purpose |
 |---|---|
-| `docker-compose.png` | Docker Compose services and health status |
-| `docker-images-users.png` | Docker image sizes and non-root container users |
-| `docker-ui.png` | LoanTrack UI running under Docker Compose |
-| `kubernetes-ui.png` | LoanTrack UI running under Kubernetes |
+| `evidence/docker-compose.png` | Docker Compose services and health status |
+| `evidence/docker-ui.png` | LoanTrack UI running through Docker Compose |
+| `evidence/kubernetes-ui.png` | LoanTrack UI running through Kubernetes |
 
 Terminal commands and outputs remain the primary evidence where possible.
 
 ---
 
-## 8. Evidence Summary
+## 9. Evidence Summary
 
 The implemented LoanTrack system was verified in both environments:
 
@@ -405,15 +457,14 @@ Docker Compose
 
 Kubernetes
   Frontend -> Backend -> PostgreSQL       PASS
-
-Backend replicas = 3                      PASS
-PostgreSQL persistent storage             PASS
-Health/readiness probes                   PASS
-Non-root application containers           PASS
-Backend image < 300 MB                    PASS
-Kubernetes Service DNS                    PASS
-Rolling update and rollback               PASS
-Pod replacement                           PASS
-Database persistence after pod deletion   PASS
-Deployment automation                     PASS
+  Backend replicas = 3                    PASS
+  PostgreSQL persistent storage           PASS
+  Health/readiness probes                 PASS
+  Non-root application containers         PASS
+  Backend image < 300 MB                  PASS
+  Kubernetes Service DNS                  PASS
+  Rolling update and rollback             PASS
+  Pod replacement                         PASS
+  Database persistence after pod deletion PASS
+  Deployment automation                   PASS
 ```
