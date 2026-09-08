@@ -58,7 +58,7 @@ fi
 echo "Building backend image..."
 minikube image build \
     --profile minikube \
-    -t loantrack-backend:v1 \
+    -t loantrack-backend:v2 \
     ./backend
 
 echo "Building frontend image..."

@@ -125,7 +125,7 @@ minikube start --driver=docker --cpus=2 --memory=4096
 ### Build Images
 
 ```bash
-minikube image build -t loantrack-backend:v1 ./backend
+minikube image build -t loantrack-backend:v2 ./backend
 minikube image build -t loantrack-frontend:v1 ./frontend
 ```
 
