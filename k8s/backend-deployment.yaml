@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: loantrack-backend:v1
+          image: loantrack-backend:v2
           imagePullPolicy: IfNotPresent
 
           ports:
