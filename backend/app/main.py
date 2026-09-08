@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import socket
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,12 @@ logger = logging.getLogger("loantrack")
 
 # LoanTrack backend
 app = FastAPI(title="LoanTrack API")
+
+@app.middleware("http")
+async def add_pod_name_header(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Pod-Name"] = socket.gethostname()
+    return response
 
 
 app.add_middleware(
