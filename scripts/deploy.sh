@@ -160,7 +160,32 @@ echo
 kubectl get services -n loantrack
 
 echo
-echo "Open LoanTrack with:"
-echo "  minikube service frontend -n loantrack --url"
+echo "Starting frontend access tunnel..."
+
+URL_FILE="$(mktemp)"
+minikube service frontend -n loantrack --url > "$URL_FILE" 2>/dev/null &
+TUNNEL_PID=$!
+
+for i in {1..15}; do
+    if grep -q '^http://' "$URL_FILE"; then
+        break
+    fi
+    sleep 1
+done
+
+FRONTEND_URL="$(grep '^http://' "$URL_FILE" | head -n 1)"
+
+if [[ -z "$FRONTEND_URL" ]]; then
+    echo "ERROR: Could not determine frontend URL."
+    kill "$TUNNEL_PID" 2>/dev/null || true
+    rm -f "$URL_FILE"
+    exit 1
+fi
+
+echo "LoanTrack URL: $FRONTEND_URL"
 echo
 echo "Deployment is complete."
+echo "Keep this terminal open while using the URL."
+
+wait "$TUNNEL_PID"
+rm -f "$URL_FILE"
