@@ -204,6 +204,29 @@ database data.
 - **Memory vs CPU limits:** Exceeding a container's memory limit can cause it to be killed, while exceeding its CPU limit results in CPU throttling rather than an immediate kill.
 - **Kubernetes Secret security:** Secret values are base64-encoded for representation, not encrypted; in production I would use a managed secret-management solution such as a cloud secret manager or Vault with appropriate access controls and encryption.
 
+### Probe Timing Justification
+
+The backend startup probe uses `periodSeconds: 5`, `timeoutSeconds: 3`, and
+`failureThreshold: 18`, giving approximately 90 seconds for startup. This is
+intentional because the backend retries its PostgreSQL connection with
+exponential backoff during startup.
+
+The backend readiness probe uses `/readyz` with `periodSeconds: 5`,
+`timeoutSeconds: 3`, and `failureThreshold: 3`. This prevents a backend that
+cannot reach PostgreSQL from receiving application traffic while allowing the
+process to remain running and continue recovering.
+
+The backend liveness probe uses `/healthz` with `periodSeconds: 10`,
+`timeoutSeconds: 3`, and `failureThreshold: 3`. It checks process health
+independently of PostgreSQL so a database outage does not unnecessarily restart
+the backend.
+
+The frontend startup probe uses `periodSeconds: 5`, `timeoutSeconds: 3`, and
+`failureThreshold: 12`, giving approximately 60 seconds for Nginx to start.
+Its readiness probe uses `/healthz` with `periodSeconds: 5`, `timeoutSeconds: 3`,
+and `failureThreshold: 3`. Its liveness probe uses `/healthz` with
+`periodSeconds: 10`, `timeoutSeconds: 3`, and `failureThreshold: 3`.
+
 ## Security
 
 Real credentials are stored only in the local git-ignored `.env` file for
